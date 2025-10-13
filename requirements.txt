@@ -1,4 +1,4 @@
-# To ensure app dependencies are ported from your virtual environment/host machine into your container, run 'pip freeze > requirements.txt' in the terminal to overwrite this file
+# To ensure app dependencies are ported from your virtual environment/host machine into the container, run 'pip freeze > requirements.txt' in the terminal to overwrite this file
 fastapi[all]
 uvicorn[standard]
 gunicorn
@@ -12,16 +12,18 @@ sqlalchemy_utils
 pydantic
 starlette
 strawberry-graphql
+
+# Microsoft Entra ID (Azure AD) Integration
+msal==1.24.1
+python-dotenv==1.0.0
+
 click
 aiodataloader
 aiohttp
 requests
 pyjwt[crypto]
 
-
 https://github.com/hrbolek/uoishelpers/archive/refs/heads/main.zip
 
 prometheus-client
 prometheus_fastapi_instrumentator
-
-
