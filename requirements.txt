@@ -8,6 +8,7 @@ sqlalchemy-cockroachdb
 
 sqlalchemy
 sqlalchemy_utils
+greenlet  # Required for SQLAlchemy async operations
 
 pydantic
 starlette
@@ -16,6 +17,10 @@ strawberry-graphql
 # Microsoft Entra ID (Azure AD) Integration
 msal==1.24.1
 python-dotenv==1.0.0
+itsdangerous==2.1.2  # For secure session cookies
+
+# Redis for session storage (shared with frontendui)
+redis==5.0.1
 
 click
 aiodataloader

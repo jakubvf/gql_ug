@@ -193,8 +193,8 @@ app = FastAPI(lifespan=lifespan)
 
 # Add Azure AD authentication middleware
 # Pass the session_maker_factory so middleware can access DB for JIT provisioning
-from src.auth.azure_ad import AzureADAuthMiddleware
-app.add_middleware(AzureADAuthMiddleware, demo_mode=DEMO, session_maker_factory=RunOnceAndReturnSessionMaker)
+from src.auth.session_middleware import SessionValidationMiddleware
+app.add_middleware(SessionValidationMiddleware, demo_mode=DEMO, session_maker_factory=RunOnceAndReturnSessionMaker)
 logging.info(f"Azure AD authentication middleware added (DEMO mode: {DEMO})")
 
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -227,68 +227,42 @@ async def graphiql():
     realpath = os.path.realpath("./src/Htmls/tests.html")
     return realpath
 
-# Azure AD OAuth endpoints
-from fastapi.responses import RedirectResponse, HTMLResponse
-from src.auth.azure_ad import get_msal_app, get_azure_config
+# ============================================================================
+# NOTE: Azure AD OAuth endpoints have been moved to frontendui
+# The frontendui service now handles authentication at /auth/login, /auth/callback, /auth/logout
+# This service (gql_ug) now only validates sessions via SessionValidationMiddleware
+# OAuth endpoints below are commented out for reference
+# ============================================================================
 
-@app.get("/auth/login")
-async def azure_login():
-    """Initiate Azure AD OAuth flow"""
-    if DEMO:
-        return {"message": "Authentication disabled in DEMO mode"}
-
-    msal_app = get_msal_app()
-    config = get_azure_config()
-
-    auth_url = msal_app.get_authorization_request_url(
-        scopes=config["scopes"],
-        redirect_uri=config["redirect_uri"]
-    )
-
-    return RedirectResponse(url=auth_url)
-
-@app.get("/auth/callback")
-async def azure_callback(code: str = None, error: str = None):
-    """Handle Azure AD OAuth callback"""
-    if DEMO:
-        return {"message": "Authentication disabled in DEMO mode"}
-
-    if error:
-        return HTMLResponse(f"<h1>Authentication Error</h1><p>{error}</p>", status_code=400)
-
-    if not code:
-        return HTMLResponse("<h1>Error</h1><p>No authorization code received</p>", status_code=400)
-
-    msal_app = get_msal_app()
-    config = get_azure_config()
-
-    result = msal_app.acquire_token_by_authorization_code(
-        code=code,
-        scopes=config["scopes"],
-        redirect_uri=config["redirect_uri"]
-    )
-
-    if "error" in result:
-        return HTMLResponse(
-            f"<h1>Authentication Error</h1><p>{result.get('error')}: {result.get('error_description')}</p>",
-            status_code=400
-        )
-
-    access_token = result.get("access_token")
-
-    return HTMLResponse(f"""
-    <html>
-        <head><title>Authentication Successful</title></head>
-        <body>
-            <h1>Authentication Successful!</h1>
-            <p>You have been successfully authenticated with Microsoft Entra ID.</p>
-            <h2>Access Token (use this in Authorization header)</h2>
-            <textarea readonly style="width: 100%; height: 200px; font-family: monospace;">{access_token}</textarea>
-            <p>To use the GraphQL API, include this token in your requests:</p>
-            <pre>Authorization: Bearer {access_token[:50]}...</pre>
-        </body>
-    </html>
-    """)
+# # Azure AD OAuth endpoints (DISABLED - now handled by frontendui)
+# # from fastapi.responses import RedirectResponse, HTMLResponse
+# # from src.auth.azure_ad import (
+# #     get_msal_app,
+# #     get_azure_config,
+# #     create_pkce_params,
+# #     store_pkce_verifier,
+# #     get_pkce_verifier,
+# #     store_access_token,
+# #     clear_access_token
+# # )
+# # import uuid
+#
+# # @app.get("/auth/login")
+# # async def azure_login(request: Request):
+# #     """Initiate Azure AD OAuth flow with PKCE"""
+# #     ... (implementation removed - now in frontendui)
+#
+# # @app.get("/auth/callback")
+# # async def azure_callback(code: str = None, state: str = None, error: str = None, error_description: str = None):
+# #     """Handle Azure AD OAuth callback with PKCE"""
+# #     ... (implementation removed - now in frontendui)
+#
+# # @app.get("/auth/logout")
+# # async def azure_logout(request: Request):
+# #     """Logout endpoint - clears session"""
+# #     ... (implementation removed - now in frontendui)
+#
+# # End of commented out OAuth endpoints - all auth now handled by frontendui
 
 @app.get("/health")
 async def health_check():

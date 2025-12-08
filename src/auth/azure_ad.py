@@ -12,6 +12,9 @@ import os
 import logging
 import uuid
 import datetime
+import hashlib
+import base64
+import secrets
 from typing import Optional, Dict, Any
 from functools import lru_cache
 
@@ -24,6 +27,78 @@ from sqlalchemy.future import select
 
 # Microsoft Graph API base URL
 GRAPH_API_BASE = "https://graph.microsoft.com/v1.0"
+
+
+# PKCE (Proof Key for Code Exchange) helpers
+def create_pkce_params() -> Dict[str, str]:
+    """
+    Create PKCE parameters for OAuth 2.0 authorization code flow.
+
+    PKCE helps prevent authorization code interception attacks.
+
+    Returns:
+        dict: Contains code_verifier and code_challenge
+    """
+    # Generate a random code verifier (43-128 characters)
+    code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
+
+    # Create code challenge using SHA256
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode('utf-8')).digest()
+    ).decode('utf-8').rstrip('=')
+
+    return {
+        "code_verifier": code_verifier,
+        "code_challenge": code_challenge
+    }
+
+
+# Session storage for PKCE verifiers and access tokens (in production, use Redis or similar)
+_pkce_storage = {}
+_token_storage = {}  # Maps session_id -> access_token
+
+def store_pkce_verifier(state: str, verifier: str):
+    """Store PKCE verifier for later retrieval"""
+    _pkce_storage[state] = verifier
+
+def get_pkce_verifier(state: str) -> Optional[str]:
+    """Retrieve and remove PKCE verifier"""
+    return _pkce_storage.pop(state, None)
+
+
+def store_access_token(session_id: str, access_token: str, expires_in: int = 3600):
+    """Store access token for a session"""
+    _token_storage[session_id] = {
+        "token": access_token,
+        "expires_at": datetime.datetime.now() + datetime.timedelta(seconds=expires_in)
+    }
+    logging.info(f"Stored access token for session: {session_id}")
+
+
+def get_access_token(session_id: str) -> Optional[str]:
+    """Retrieve access token for a session if still valid"""
+    token_data = _token_storage.get(session_id)
+    if not token_data:
+        return None
+
+    # Check if token has expired
+    if datetime.datetime.now() >= token_data["expires_at"]:
+        logging.info(f"Token expired for session: {session_id}")
+        _token_storage.pop(session_id, None)
+        return None
+
+    return token_data["token"]
+
+
+def clear_access_token(session_id: str):
+    """Clear access token for a session (logout)"""
+    if session_id in _token_storage:
+        _token_storage.pop(session_id)
+        logging.info(f"Cleared access token for session: {session_id}")
+
+def get_pkce_params() -> Dict[str, str]:
+    """Alias for create_pkce_params for backwards compatibility"""
+    return create_pkce_params()
 
 
 @lru_cache()
@@ -320,7 +395,7 @@ class AzureADAuthMiddleware(BaseHTTPMiddleware):
         Process each request through the authentication pipeline.
         """
         # Skip authentication for health check, metrics, docs, and auth endpoints
-        if request.url.path in ["/health", "/metrics", "/voyager", "/doc", "/auth/login", "/auth/callback"]:
+        if request.url.path in ["/health", "/metrics", "/voyager", "/doc", "/auth/login", "/auth/callback", "/auth/logout"]:
             return await call_next(request)
 
         # DEMO mode: bypass authentication
@@ -329,29 +404,41 @@ class AzureADAuthMiddleware(BaseHTTPMiddleware):
             request.scope["user"] = self.demo_user
             return await call_next(request)
 
-        # Extract Authorization header
-        auth_header = request.headers.get("Authorization")
+        # Try to get token from session cookie first
+        session_id = request.cookies.get("session_id")
+        token = None
 
-        if not auth_header:
-            logging.warning("No Authorization header found")
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Missing Authorization header"}
-            )
+        if session_id:
+            token = get_access_token(session_id)
+            if token:
+                logging.info(f"Using token from session: {session_id[:8]}...")
+            else:
+                logging.info(f"Session expired or invalid: {session_id[:8]}...")
 
-        # Extract Bearer token
-        try:
-            scheme, token = auth_header.split()
-            if scheme.lower() != "bearer":
+        # If no valid session token, try Authorization header
+        if not token:
+            auth_header = request.headers.get("Authorization")
+
+            if not auth_header:
+                logging.warning("No Authorization header or valid session found")
                 return JSONResponse(
                     status_code=401,
-                    content={"detail": "Invalid authentication scheme. Expected Bearer."}
+                    content={"detail": "Missing Authorization header or session. Please login at /auth/login"}
                 )
-        except ValueError:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Invalid Authorization header format"}
-            )
+
+            # Extract Bearer token
+            try:
+                scheme, token = auth_header.split()
+                if scheme.lower() != "bearer":
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "Invalid authentication scheme. Expected Bearer."}
+                    )
+            except ValueError:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Invalid Authorization header format"}
+                )
 
         # Validate token and get user info
         token_claims = verify_azure_token(token)
