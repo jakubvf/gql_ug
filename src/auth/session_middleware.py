@@ -166,6 +166,36 @@ class SessionValidationMiddleware(BaseHTTPMiddleware):
                     content={"detail": "Invalid session data"}
                 )
 
+            # JIT user provisioning: sync user from session to database
+            if self.session_maker_factory and user_data.get("source") == "azure_ad":
+                try:
+                    from src.auth.azure_ad import get_or_create_user
+
+                    # Map session user data to azure_user format expected by get_or_create_user
+                    azure_user = {
+                        "id": user_data.get("id"),
+                        "displayName": f"{user_data.get('name', '')} {user_data.get('surname', '')}".strip(),
+                        "givenName": user_data.get("name"),
+                        "surname": user_data.get("surname"),
+                        "mail": user_data.get("email"),
+                        "userPrincipalName": user_data.get("userPrincipalName", user_data.get("email"))
+                    }
+
+                    # Get the session maker (cached by singleCall decorator)
+                    session_maker = await self.session_maker_factory()
+
+                    # Get or create user in database and get their DB user ID
+                    db_user = await get_or_create_user(session_maker, azure_user)
+
+                    # Replace session user data with database user data
+                    user_data = db_user
+
+                    logger.info(f"Synced user to database: {user_data.get('email')} (DB ID: {user_data.get('id')})")
+                except Exception as e:
+                    logger.error(f"Error in JIT user provisioning: {e}", exc_info=True)
+                    # Continue with session user data even if DB sync fails
+                    logger.warning("Continuing with session user data (DB sync failed)")
+
             # Store user in request scope for downstream use
             request.scope["user"] = user_data
 
