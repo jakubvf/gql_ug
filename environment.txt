@@ -1,6 +1,11 @@
-DEMO=True
-DEMODATA=True
-DEMOUSER={"id": "2d9dc5ca-a4a2-11ed-b9df-0242ac120003", "name": "John", "surname": "Newbie"}
-
-JWTPUBLICKEYURL=http://localhost:33001/oauth/publickey
-JWTRESOLVEUSERPATHURL=http://localhost:33001/oauth/userinfo
+DEMO=False
+AZURE_TENANT_ID=your-tenant-id
+AZURE_CLIENT_ID=your-client-id
+AZURE_CLIENT_SECRET=your-client-secret
+AZURE_REDIRECT_URI=http://localhost:8000/auth/callback
+AZURE_SCOPES=User.Read,User.ReadBasic.All
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=example
+POSTGRES_DB=data
+POSTGRES_HOST=localhost:5432
+DEMODATA=False
