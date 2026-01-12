@@ -4,6 +4,7 @@ import strawberry
 import uuid
 import datetime
 import graphql
+import logging
 
 # from contextlib import asynccontextmanager
 
@@ -112,14 +113,14 @@ me_query = """{
 }"""
 class UGWhoAmIExtension(WhoAmIExtension):
     def __init__(self, execution_context):
-        # print(f"UGWhoAmIExtension called")
+        self.logger = logging.getLogger(__name__)
         JWTPUBLICKEYURL = os.environ.get("JWTPUBLICKEYURL", "http://localhost:8000/oauth/publickey")
         JWTRESOLVEUSERPATHURL = os.environ.get("JWTRESOLVEUSERPATHURL", "http://localhost:8000/oauth/userinfo")
         self.sentinel = createAuthentizationSentinel(
             queriesWOAuthentization=[],
             JWTPUBLICKEY=JWTPUBLICKEYURL,
             JWTRESOLVEUSERPATH=JWTRESOLVEUSERPATHURL,
-            onAuthenticationError=lambda item: JSONResponse({"data": None, "errors": ["Unauthenticated", item.query, f"{item.variables}"]}, 
+            onAuthenticationError=lambda item: JSONResponse({"data": None, "errors": ["Unauthenticated", item.query, f"{item.variables}"]},
                 status_code=401)
         )
 
@@ -144,12 +145,21 @@ class UGWhoAmIExtension(WhoAmIExtension):
         if user is not None:
             return
         request = self.execution_context.context.get("request")
-        # print(f"UGWhoAmIExtension.{self.execution_context.context}")
+
+        # Check if SessionValidationMiddleware already set complete Azure AD user data
+        existing_user = request.scope.get("user", None)
+        if (existing_user and
+            existing_user.get("source") == "azure_ad" and
+            existing_user.get("name") and
+            existing_user.get("surname")):
+            # User already authenticated by SessionValidationMiddleware with DB UUID
+            # Skip Sentinel validation to preserve the correct user data
+            self.logger.info(f"Using authenticated Azure AD user from SessionValidationMiddleware: {existing_user.get('email')}")
+            return
+
+        # Call Sentinel for DEMO mode, legacy JWT auth, or when SessionValidationMiddleware didn't run
         item = Item(variables={}, query="")
-        
         await self.sentinel(request, item)
-        # print(f"UGWhoAmIExtension.sentinelResult={sentinelResult}:\n{item.query}\nwith\n{item.variables}")
-        # print(f"""{request.scope["user"]}""")
 
     async def on_execute(self):
         # print(f"UGWhoAmIExtension")
