@@ -25,4 +25,7 @@ yarn-error.log*
 config.json
 data.json
 
+# Environment files with secrets
+.env
+
 **/__pycache__
